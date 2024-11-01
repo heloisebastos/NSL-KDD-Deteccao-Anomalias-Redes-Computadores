@@ -1,0 +1,67 @@
+# Definindo as dimensões do modelo
+input_dim = X_train.shape[1]  # Obtém o número de características (colunas) dos dados normalizados
+hidden_dim = 128  # Define o número de unidades na camada oculta
+latent_dim = 32   # Define o número de dimensões na camada latente
+
+# Definindo o modelo Variational Autoencoder (VAE)
+class VAE(nn.Module):  # Define uma classe VAE que herda de nn.Module
+    def __init__(self, input_dim, hidden_dim, latent_dim):  # Inicializador da classe
+        super(VAE, self).__init__()  # Chama o inicializador da classe pai
+        self.fc1 = nn.Linear(input_dim, hidden_dim)  # Camada de entrada para camada oculta
+        self.fc21 = nn.Linear(hidden_dim, latent_dim)  # Camada que gera a média da distribuição latente
+        self.fc22 = nn.Linear(hidden_dim, latent_dim)  # Camada que gera a log variância da distribuição latente
+        self.fc3 = nn.Linear(latent_dim, hidden_dim)  # Camada que gera a representação oculta a partir da amostra latente
+        self.fc4 = nn.Linear(hidden_dim, input_dim)  # Camada que gera a saída final (dados reconstruídos)
+
+    def encode(self, x):  # Método para codificar a entrada
+        h1 = torch.relu(self.fc1(x))  # Passa a entrada pela primeira camada e aplica a função de ativação ReLU
+        return self.fc21(h1), self.fc22(h1)  # Retorna as médias (mu) e log variâncias (logvar)
+
+    def reparameterize(self, mu, logvar):  # Implementa o truque de reparametrização
+        std = torch.exp(0.5 * logvar)  # Calcula o desvio padrão a partir da log variância
+        eps = torch.randn_like(std)  # Gera ruído aleatório com a mesma forma que std
+        return mu + eps * std  # Retorna uma amostra da distribuição
+
+    def decode(self, z):  # Método para decodificar a amostra latente
+        h3 = torch.relu(self.fc3(z))  # Passa a amostra pela camada oculta
+        return torch.sigmoid(self.fc4(h3))  # Gera a saída final aplicando a função sigmoide
+
+    def forward(self, x):  # Realiza o fluxo completo do VAE
+        mu, logvar = self.encode(x.view(-1, input_dim))  # Codifica a entrada redimensionada
+        z = self.reparameterize(mu, logvar)  # Amostra da distribuição latente
+        return self.decode(z), mu, logvar  # Retorna a saída reconstruída, média e log variância
+
+model = VAE(input_dim, hidden_dim, latent_dim)  # Instancia o modelo VAE
+
+# Definindo a função de perda
+def loss_function(recon_x, x, mu, logvar):  # Função que calcula a perda total
+    BCE = nn.functional.binary_cross_entropy(recon_x, x, reduction='sum')  # Calcula a perda de entropia cruzada
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())  # Calcula a divergência KL
+    return BCE + KLD  # Retorna a perda total como a soma das duas perdas
+
+# Treinamento
+num_epochs = 300 # Define o número de épocas para treinamento
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)  # Inicializa o otimizador Adam com taxa de aprendizado
+
+# Loop de treinamento
+for epoch in range(num_epochs):
+    model.train()  # Coloca o modelo em modo de treinamento
+    train_loss = 0  # Inicializa a perda do treinamento
+    for batch_idx, (data,) in enumerate(train_loader):  # Loop sobre os lotes de dados
+        optimizer.zero_grad()  # Zera os gradientes do otimizador
+        data = data.view(-1, input_dim)  # Redimensiona os dados para a forma correta
+        recon_batch, mu, logvar = model(data)  # Passa os dados pelo modelo
+
+        # Verificando os limites dos dados reconstruídos e originais
+        #if batch_idx == 0:  # Imprime apenas no primeiro batch
+            # print("Recon Batch Min:", recon_batch.min().item(), "Max:", recon_batch.max().item())  # Imprime os limites dos dados reconstruídos
+            # print("Data Min:", data.min().item(), "Max:", data.max().item())  # Imprime os limites dos dados de entrada
+
+        loss = loss_function(recon_batch, data, mu, logvar)  # Calcula a perda
+        loss.backward()  # Realiza a retropropagação
+        train_loss += loss.item()  # Acumula a perda total
+        optimizer.step()  # Atualiza os parâmetros do modelo
+    
+    train_loss /= len(train_loader.dataset)  # Calcula a média da perda por exemplo
+    print(f'Epoch {epoch + 1} Loss: {train_loss:.4f}')  # Imprime a época atual e a perda média
+  
